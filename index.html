@@ -97,6 +97,14 @@
   .tag.atm b{ color:var(--atm); }
   .tag.maxpain{ border-color:rgba(155,138,251,0.4); color:var(--maxpain); }
   .tag.maxpain b{ color:var(--maxpain); }
+  .tag.range-picker{ gap:8px; }
+  .tag.range-picker label{ color:var(--muted); }
+  .tag.range-picker select{
+    background:var(--panel-2); color:var(--text); border:1px solid var(--border);
+    border-radius:6px; font-family:'JetBrains Mono', monospace; font-size:12px;
+    padding:3px 6px; cursor:pointer;
+  }
+  .tag.range-picker select:focus{ outline:2px solid var(--atm); outline-offset:1px; }
 
   /* ---------- Note panel ---------- */
   .note{
@@ -189,6 +197,17 @@
       <div class="tag-group">
         <div class="tag atm">ATM <b id="atmStrike">—</b></div>
         <div class="tag maxpain">Max Pain <b id="maxPainStrike">—</b></div>
+        <div class="tag range-picker">
+          <label for="rangeSelect">Strikes ± ATM</label>
+          <select id="rangeSelect">
+            <option value="3">3</option>
+            <option value="5">5</option>
+            <option value="10" selected>10</option>
+            <option value="15">15</option>
+            <option value="20">20</option>
+            <option value="all">All</option>
+          </select>
+        </div>
       </div>
     </div>
 
@@ -230,6 +249,22 @@ document.getElementById('refreshSecs').textContent = Math.round(CONFIG.REFRESH_M
 
 let lastGoodData = null;
 let prevSpot = null;
+let selectedRange = document.getElementById('rangeSelect').value; // "3".."20" or "all"
+
+document.getElementById('rangeSelect').addEventListener('change', (e) => {
+  selectedRange = e.target.value;
+  if (lastGoodData) renderTable(lastGoodData);
+});
+
+function filterRowsByRange(rows, atmStrike, range){
+  if (range === 'all') return rows;
+  const n = parseInt(range, 10);
+  const atmIdx = rows.findIndex(r => r.strike === atmStrike);
+  if (atmIdx === -1) return rows;
+  const start = Math.max(0, atmIdx - n);
+  const end = Math.min(rows.length - 1, atmIdx + n);
+  return rows.slice(start, end + 1);
+}
 
 function fmtLakhCr(v){
   if (v >= 10000000) return (v/10000000).toFixed(2) + "Cr";
@@ -277,7 +312,12 @@ function render(data){
   document.getElementById('noteBox').innerHTML = '<span class="prompt">&gt;</span> ' +
     (data.note || 'no note yet').replace(/\n/g, '<br>');
 
-  const rows = data.rows || [];
+  renderTable(data);
+}
+
+function renderTable(data){
+  const allRows = data.rows || [];
+  const rows = filterRowsByRange(allRows, data.atmStrike, selectedRange);
   const maxCallOI = Math.max(...rows.map(r => r.call.oi), 1);
   const maxPutOI  = Math.max(...rows.map(r => r.put.oi), 1);
   const maxCallVol = Math.max(...rows.map(r => r.call.volume), 1);
