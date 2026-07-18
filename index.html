@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 <style>
   :root{
     --bg:        #0B0E13;
@@ -175,6 +176,29 @@
   }
   .state-msg b{ color:var(--text); }
 
+  /* ---------- Chart section ---------- */
+  .chart-section{
+    background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    padding:18px 20px 10px; margin-top:16px;
+  }
+  .chart-header{
+    display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap;
+    gap:10px; margin-bottom:14px;
+  }
+  .chart-title{
+    font-family:'Space Grotesk', sans-serif; font-weight:600; font-size:13px;
+    letter-spacing:0.04em; color:var(--text);
+  }
+  .metric-toggle{ display:flex; gap:6px; }
+  .metric-btn{
+    background:var(--panel-2); color:var(--muted); border:1px solid var(--border);
+    border-radius:20px; padding:6px 14px; font-family:'JetBrains Mono', monospace;
+    font-size:11.5px; cursor:pointer; transition:color .15s, border-color .15s;
+  }
+  .metric-btn:hover{ color:var(--text); }
+  .metric-btn.active{ color:var(--atm); border-color:rgba(212,167,44,0.5); }
+  .chart-canvas-wrap{ position:relative; height:320px; }
+
   @media (max-width:640px){
     .ticker .spot-block .value{ font-size:26px; }
     .wrap{ padding:14px 10px 40px; }
@@ -233,6 +257,19 @@
       </table>
     </div>
 
+    <div class="chart-section">
+      <div class="chart-header">
+        <div class="chart-title" id="chartTitle">Open Interest by Strike</div>
+        <div class="metric-toggle">
+          <button class="metric-btn active" data-metric="oi">OI</button>
+          <button class="metric-btn" data-metric="oiChg">OI Chg %</button>
+        </div>
+      </div>
+      <div class="chart-canvas-wrap">
+        <canvas id="oiChart"></canvas>
+      </div>
+    </div>
+
     <div class="foot">Source: Google Sheets / Apps Script backend · auto-refreshes every <span id="refreshSecs">45</span>s</div>
   </div>
 
@@ -250,11 +287,114 @@ document.getElementById('refreshSecs').textContent = Math.round(CONFIG.REFRESH_M
 let lastGoodData = null;
 let prevSpot = null;
 let selectedRange = document.getElementById('rangeSelect').value; // "3".."20" or "all"
+let currentMetric = 'oi';
+let oiChartInstance = null;
 
 document.getElementById('rangeSelect').addEventListener('change', (e) => {
   selectedRange = e.target.value;
-  if (lastGoodData) renderTable(lastGoodData);
+  if (lastGoodData) { renderTable(lastGoodData); renderChart(lastGoodData); }
 });
+
+document.querySelectorAll('.metric-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.metric-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentMetric = btn.dataset.metric;
+    document.getElementById('chartTitle').textContent =
+      currentMetric === 'oi' ? 'Open Interest by Strike' : 'OI Change % by Strike';
+    if (lastGoodData) renderChart(lastGoodData);
+  });
+});
+
+// Draws a dashed vertical marker + label at the ATM strike, on top of the bars
+const atmLinePlugin = {
+  id: 'atmLinePlugin',
+  afterDraw(chart) {
+    const atmStrike = chart.$atmStrike;
+    if (atmStrike == null) return;
+    const idx = chart.data.labels.indexOf(String(atmStrike));
+    if (idx === -1) return;
+    const xScale = chart.scales.x;
+    const yScale = chart.scales.y;
+    const x = xScale.getPixelForValue(idx);
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.setLineDash([4, 4]);
+    ctx.moveTo(x, yScale.top);
+    ctx.lineTo(x, yScale.bottom);
+    ctx.strokeStyle = 'rgba(212,167,44,0.7)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = '#D4A72C';
+    ctx.font = "600 10.5px 'Space Grotesk', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.fillText('ATM ' + atmStrike, x, yScale.top - 6);
+    ctx.restore();
+  }
+};
+
+function renderChart(data){
+  const rows = filterRowsByRange(data.rows || [], data.atmStrike, selectedRange);
+  const labels = rows.map(r => String(r.strike));
+  const callData = rows.map(r => currentMetric === 'oi' ? r.call.oi : r.call.oiChgPct);
+  const putData = rows.map(r => currentMetric === 'oi' ? r.put.oi : r.put.oiChgPct);
+  const tickFmt = (v) => currentMetric === 'oi' ? fmtLakhCr(v) : (v + '%');
+
+  if (oiChartInstance) {
+    oiChartInstance.data.labels = labels;
+    oiChartInstance.data.datasets[0].data = callData;
+    oiChartInstance.data.datasets[1].data = putData;
+    oiChartInstance.$atmStrike = data.atmStrike;
+    oiChartInstance.options.scales.y.ticks.callback = tickFmt;
+    oiChartInstance.update();
+    return;
+  }
+
+  const ctx = document.getElementById('oiChart').getContext('2d');
+  oiChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Call', data: callData, backgroundColor: '#E5484D', borderRadius: 3, maxBarThickness: 26 },
+        { label: 'Put', data: putData, backgroundColor: '#2FBF8F', borderRadius: 3, maxBarThickness: 26 }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          labels: { color: '#7C8698', font: { family: "'JetBrains Mono', monospace", size: 11 }, usePointStyle: true }
+        },
+        tooltip: {
+          backgroundColor: '#151B26', borderColor: '#1F2733', borderWidth: 1,
+          titleColor: '#E7EAF0', bodyColor: '#E7EAF0', padding: 10,
+          titleFont: { family: "'Space Grotesk', sans-serif" },
+          bodyFont: { family: "'JetBrains Mono', monospace" },
+          callbacks: {
+            label: (c) => c.dataset.label + ': ' +
+              (currentMetric === 'oi' ? fmtLakhCr(c.raw) : (c.raw >= 0 ? '+' : '') + c.raw.toFixed(1) + '%')
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { color: 'rgba(255,255,255,0.04)' },
+          ticks: { color: '#7C8698', font: { family: "'JetBrains Mono', monospace", size: 10 }, maxRotation: 60, minRotation: 45 }
+        },
+        y: {
+          grid: { color: 'rgba(255,255,255,0.06)' },
+          ticks: { color: '#7C8698', font: { family: "'JetBrains Mono', monospace", size: 10 }, callback: tickFmt }
+        }
+      }
+    },
+    plugins: [atmLinePlugin]
+  });
+  oiChartInstance.$atmStrike = data.atmStrike;
+}
 
 function filterRowsByRange(rows, atmStrike, range){
   if (range === 'all') return rows;
@@ -313,6 +453,7 @@ function render(data){
     (data.note || 'no note yet').replace(/\n/g, '<br>');
 
   renderTable(data);
+  renderChart(data);
 }
 
 function renderTable(data){
