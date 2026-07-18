@@ -7,6 +7,544 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:        #0B0E13;
+    --panel:     #11161F;
+    --panel-2:   #151B26;
+    --border:    #1F2733;
+    --text:      #E7EAF0;
+    --muted:     #7C8698;
+    --faint:     #4B5568;
+
+    --call:      #E5484D;
+    --call-tint: rgba(229,72,77,0.14);
+    --put:       #2FBF8F;
+    --put-tint:  rgba(47,191,143,0.14);
+
+    --atm:       #D4A72C;
+    --atm-tint:  rgba(212,167,44,0.10);
+    --maxpain:   #9B8AFB;
+
+    --bu-long:   #2FBF71;
+    --bu-short:  #E5484D;
+    --bu-sc:     #8B93A1;
+    --bu-lu:     #E2A03F;
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:'JetBrains Mono', monospace;
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{ background:var(--atm); color:#0B0E13; }
+
+  .wrap{ max-width:1180px; margin:0 auto; padding:20px 16px 60px; }
+
+  /* ---------- Header ---------- */
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding-bottom:16px; margin-bottom:16px; border-bottom:1px solid var(--border);
+  }
+  .brand{
+    font-family:'Space Grotesk', sans-serif;
+    font-weight:700; font-size:15px; letter-spacing:0.14em;
+    text-transform:uppercase; color:var(--text);
+    display:flex; align-items:center; gap:10px;
+  }
+  .brand small{
+    font-family:'JetBrains Mono', monospace; font-weight:500;
+    letter-spacing:0.02em; color:var(--faint); text-transform:none; font-size:12px;
+  }
+  .live{
+    display:flex; align-items:center; gap:8px;
+    font-size:12px; color:var(--muted); letter-spacing:0.04em;
+  }
+  .dot{
+    width:8px; height:8px; border-radius:50%; background:var(--bu-long);
+    box-shadow:0 0 0 0 rgba(47,191,113,0.6);
+    animation:pulse 2s infinite;
+  }
+  .dot.stale{ background:var(--faint); animation:none; box-shadow:none; }
+  @keyframes pulse{
+    0%{ box-shadow:0 0 0 0 rgba(47,191,113,0.5); }
+    70%{ box-shadow:0 0 0 7px rgba(47,191,113,0); }
+    100%{ box-shadow:0 0 0 0 rgba(47,191,113,0); }
+  }
+
+  /* ---------- Ticker ---------- */
+  .ticker{
+    display:flex; flex-wrap:wrap; align-items:flex-end; gap:28px;
+    padding:22px 24px; background:var(--panel); border:1px solid var(--border);
+    border-radius:10px; margin-bottom:14px;
+  }
+  .ticker .spot-block .label{ font-size:11px; color:var(--muted); letter-spacing:0.12em; text-transform:uppercase; margin-bottom:6px; }
+  .ticker .spot-block .value{ font-family:'Space Grotesk', sans-serif; font-size:34px; font-weight:700; line-height:1; }
+  .ticker .spot-block .value.up{ color:var(--bu-long); }
+  .ticker .spot-block .value.down{ color:var(--call); }
+
+  .tag-group{ display:flex; gap:10px; flex-wrap:wrap; }
+  .tag{
+    font-size:12px; padding:6px 12px; border-radius:20px; border:1px solid var(--border);
+    color:var(--muted); display:flex; gap:6px; align-items:center;
+  }
+  .tag b{ color:var(--text); font-weight:600; }
+  .tag.atm{ border-color:rgba(212,167,44,0.4); color:var(--atm); }
+  .tag.atm b{ color:var(--atm); }
+  .tag.maxpain{ border-color:rgba(155,138,251,0.4); color:var(--maxpain); }
+  .tag.maxpain b{ color:var(--maxpain); }
+  .tag.range-picker{ gap:8px; }
+  .tag.range-picker label{ color:var(--muted); }
+  .tag.range-picker select{
+    background:var(--panel-2); color:var(--text); border:1px solid var(--border);
+    border-radius:6px; font-family:'JetBrains Mono', monospace; font-size:12px;
+    padding:3px 6px; cursor:pointer;
+  }
+  .tag.range-picker select:focus{ outline:2px solid var(--atm); outline-offset:1px; }
+
+  /* ---------- Note panel ---------- */
+  .note{
+    background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    padding:16px 18px; margin-bottom:18px; font-size:13px; line-height:1.75;
+    color:#B7E4C7; white-space:pre-wrap; position:relative;
+  }
+  .note::before{
+    content:"MARKET NOTE"; position:absolute; top:-9px; left:14px;
+    background:var(--bg); padding:0 8px; font-size:10px; letter-spacing:0.14em;
+    color:var(--faint); font-family:'Space Grotesk', sans-serif; font-weight:600;
+  }
+  .note .prompt{ color:var(--faint); }
+
+  /* ---------- Table ---------- */
+  .chain-container{
+    background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    overflow-x:auto; -webkit-overflow-scrolling:touch;
+  }
+  table{ border-collapse:collapse; width:100%; min-width:840px; font-size:12.5px; }
+  thead th{
+    position:sticky; top:0; background:var(--panel-2); z-index:2;
+    font-family:'Space Grotesk', sans-serif; font-weight:600; font-size:10.5px;
+    letter-spacing:0.08em; text-transform:uppercase; color:var(--muted);
+    padding:10px 8px; border-bottom:1px solid var(--border); text-align:center;
+  }
+  thead tr.group th{ font-size:11px; padding:9px 8px; }
+  thead tr.group th.call-h{ background:rgba(229,72,77,0.18); color:var(--call); }
+  thead tr.group th.put-h{ background:rgba(47,191,143,0.18); color:var(--put); }
+  thead tr.group th.strike-h{ background:var(--panel-2); }
+
+  tbody td{
+    padding:8px; text-align:center; border-bottom:1px solid rgba(255,255,255,0.03);
+    white-space:nowrap;
+  }
+  tbody tr:hover td{ background:rgba(255,255,255,0.02); }
+  tbody tr.atm-row td{ box-shadow: inset 0 1px 0 var(--atm), inset 0 -1px 0 var(--atm); }
+  tbody tr.atm-row td:first-child{ box-shadow: inset 0 1px 0 var(--atm), inset 0 -1px 0 var(--atm), inset 3px 0 0 var(--atm); }
+  tbody tr.atm-row td:last-child{ box-shadow: inset 0 1px 0 var(--atm), inset 0 -1px 0 var(--atm), inset -3px 0 0 var(--atm); }
+
+  .strike-cell{ font-weight:700; font-size:13px; }
+  .strike-cell .mp{ display:block; font-size:9.5px; color:var(--maxpain); font-weight:600; letter-spacing:0.04em; margin-top:2px; }
+
+  .ltp-main{ font-weight:600; }
+  .ltp-sub{ display:block; font-size:10.5px; margin-top:2px; }
+  .ltp-sub.up{ color:var(--bu-long); }
+  .ltp-sub.down{ color:var(--call); }
+
+  .pct-cell{ font-weight:700; }
+  .pct-cell.up{ color:var(--bu-long); }
+  .pct-cell.down{ color:var(--call); }
+
+  .badge{
+    display:inline-block; padding:2px 7px; border-radius:5px; font-size:10.5px; font-weight:700;
+  }
+  .b-long{ background:rgba(47,191,113,0.16); color:var(--bu-long); }
+  .b-short{ background:rgba(229,72,77,0.16); color:var(--bu-short); }
+  .b-sc{ background:rgba(139,147,161,0.16); color:var(--bu-sc); }
+  .b-lu{ background:rgba(226,160,63,0.16); color:var(--bu-lu); }
+  .b-flat{ color:var(--faint); }
+
+  /* ---------- Footer / empty / error ---------- */
+  .foot{
+    margin-top:16px; font-size:11px; color:var(--faint); text-align:center; letter-spacing:0.03em;
+  }
+  .state-msg{
+    padding:60px 20px; text-align:center; color:var(--muted); font-size:13px;
+  }
+  .state-msg b{ color:var(--text); }
+
+  /* ---------- Chart section ---------- */
+  .chart-section{
+    background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    padding:18px 20px 10px; margin-top:16px;
+  }
+  .chart-header{
+    display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap;
+    gap:10px; margin-bottom:14px;
+  }
+  .chart-title{
+    font-family:'Space Grotesk', sans-serif; font-weight:600; font-size:13px;
+    letter-spacing:0.04em; color:var(--text);
+  }
+  .metric-toggle{ display:flex; gap:6px; }
+  .metric-btn{
+    background:var(--panel-2); color:var(--muted); border:1px solid var(--border);
+    border-radius:20px; padding:6px 14px; font-family:'JetBrains Mono', monospace;
+    font-size:11.5px; cursor:pointer; transition:color .15s, border-color .15s;
+  }
+  .metric-btn:hover{ color:var(--text); }
+  .metric-btn.active{ color:var(--atm); border-color:rgba(212,167,44,0.5); }
+  .chart-canvas-wrap{ position:relative; height:320px; }
+
+  @media (max-width:640px){
+    .ticker .spot-block .value{ font-size:26px; }
+    .wrap{ padding:14px 10px 40px; }
+    table{ font-size:11.5px; min-width:760px; }
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand">NIFTY <small>// OPTION CHAIN</small></div>
+      <div class="live"><span class="dot" id="liveDot"></span><span id="updatedAt">connecting…</span></div>
+    </div>
+
+    <div class="ticker">
+      <div class="spot-block">
+        <div class="label">Spot</div>
+        <div class="value" id="spotValue">—</div>
+      </div>
+      <div class="tag-group">
+        <div class="tag atm">ATM <b id="atmStrike">—</b></div>
+        <div class="tag maxpain">Max Pain <b id="maxPainStrike">—</b></div>
+        <div class="tag range-picker">
+          <label for="rangeSelect">Strikes ± ATM</label>
+          <select id="rangeSelect">
+            <option value="3">3</option>
+            <option value="5">5</option>
+            <option value="10" selected>10</option>
+            <option value="15">15</option>
+            <option value="20">20</option>
+            <option value="all">All</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="note" id="noteBox"><span class="prompt">&gt;</span> waiting for first snapshot…</div>
+
+    <div class="chain-container">
+      <table>
+        <thead>
+          <tr class="group">
+            <th class="call-h" colspan="5">Call</th>
+            <th class="strike-h">Strike</th>
+            <th class="put-h" colspan="5">Put</th>
+          </tr>
+          <tr>
+            <th>Buildup</th><th>Volume</th><th>OI Chg%</th><th>OI</th><th>LTP</th>
+            <th>&nbsp;</th>
+            <th>LTP</th><th>OI</th><th>OI Chg%</th><th>Volume</th><th>Buildup</th>
+          </tr>
+        </thead>
+        <tbody id="chainBody">
+          <tr><td colspan="11" class="state-msg">Loading option chain…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="chart-section">
+      <div class="chart-header">
+        <div class="chart-title" id="chartTitle">Open Interest by Strike</div>
+        <div class="metric-toggle">
+          <button class="metric-btn active" data-metric="oi">OI</button>
+          <button class="metric-btn" data-metric="oiChg">OI Chg %</button>
+        </div>
+      </div>
+      <div class="chart-canvas-wrap">
+        <canvas id="oiChart"></canvas>
+      </div>
+    </div>
+
+    <div class="foot">Source: Google Sheets / Apps Script backend · auto-refreshes every <span id="refreshSecs">45</span>s</div>
+  </div>
+
+<script>
+/* ============================================================
+ * CONFIG — paste your deployed Apps Script Web App /exec URL here
+ * ============================================================ */
+const CONFIG = {
+  API_URL: "https://script.google.com/macros/s/AKfycbzDLFRrdYij5IHk8m-MsuD8tqPbO4DxC-3aVYZQ6GQCgOphjoTqLHGBLKQ1uptcPTg/exec",
+  REFRESH_MS: 45000
+};
+
+document.getElementById('refreshSecs').textContent = Math.round(CONFIG.REFRESH_MS / 1000);
+
+let lastGoodData = null;
+let prevSpot = null;
+let selectedRange = document.getElementById('rangeSelect').value; // "3".."20" or "all"
+let currentMetric = 'oi';
+let oiChartInstance = null;
+
+document.getElementById('rangeSelect').addEventListener('change', (e) => {
+  selectedRange = e.target.value;
+  if (lastGoodData) { renderTable(lastGoodData); renderChart(lastGoodData); }
+});
+
+document.querySelectorAll('.metric-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.metric-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentMetric = btn.dataset.metric;
+    document.getElementById('chartTitle').textContent =
+      currentMetric === 'oi' ? 'Open Interest by Strike' : 'OI Change % by Strike';
+    if (lastGoodData) renderChart(lastGoodData);
+  });
+});
+
+// Draws a dashed vertical marker + label at the ATM strike, on top of the bars
+const atmLinePlugin = {
+  id: 'atmLinePlugin',
+  afterDraw(chart) {
+    const atmStrike = chart.$atmStrike;
+    if (atmStrike == null) return;
+    const idx = chart.data.labels.indexOf(String(atmStrike));
+    if (idx === -1) return;
+    const xScale = chart.scales.x;
+    const yScale = chart.scales.y;
+    const x = xScale.getPixelForValue(idx);
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.setLineDash([4, 4]);
+    ctx.moveTo(x, yScale.top);
+    ctx.lineTo(x, yScale.bottom);
+    ctx.strokeStyle = 'rgba(212,167,44,0.7)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = '#D4A72C';
+    ctx.font = "600 10.5px 'Space Grotesk', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.fillText('ATM ' + atmStrike, x, yScale.top - 6);
+    ctx.restore();
+  }
+};
+
+function renderChart(data){
+  if (typeof Chart === 'undefined') {
+    const wrap = document.querySelector('.chart-canvas-wrap');
+    if (wrap && !document.getElementById('chartErrMsg')) {
+      wrap.innerHTML = '<div class="state-msg" id="chartErrMsg">Chart library failed to load — check your internet connection or an ad-blocker/script-blocker extension.</div>';
+    }
+    return;
+  }
+  const rows = filterRowsByRange(data.rows || [], data.atmStrike, selectedRange);
+  const labels = rows.map(r => String(r.strike));
+  const callData = rows.map(r => currentMetric === 'oi' ? r.call.oi : r.call.oiChgPct);
+  const putData = rows.map(r => currentMetric === 'oi' ? r.put.oi : r.put.oiChgPct);
+  const tickFmt = (v) => currentMetric === 'oi' ? fmtLakhCr(v) : (v + '%');
+
+  if (oiChartInstance) {
+    oiChartInstance.data.labels = labels;
+    oiChartInstance.data.datasets[0].data = callData;
+    oiChartInstance.data.datasets[1].data = putData;
+    oiChartInstance.$atmStrike = data.atmStrike;
+    oiChartInstance.options.scales.y.ticks.callback = tickFmt;
+    oiChartInstance.update();
+    return;
+  }
+
+  const ctx = document.getElementById('oiChart').getContext('2d');
+  oiChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Call', data: callData, backgroundColor: '#E5484D', borderRadius: 3, maxBarThickness: 26 },
+        { label: 'Put', data: putData, backgroundColor: '#2FBF8F', borderRadius: 3, maxBarThickness: 26 }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          labels: { color: '#7C8698', font: { family: "'JetBrains Mono', monospace", size: 11 }, usePointStyle: true }
+        },
+        tooltip: {
+          backgroundColor: '#151B26', borderColor: '#1F2733', borderWidth: 1,
+          titleColor: '#E7EAF0', bodyColor: '#E7EAF0', padding: 10,
+          titleFont: { family: "'Space Grotesk', sans-serif" },
+          bodyFont: { family: "'JetBrains Mono', monospace" },
+          callbacks: {
+            label: (c) => c.dataset.label + ': ' +
+              (currentMetric === 'oi' ? fmtLakhCr(c.raw) : (c.raw >= 0 ? '+' : '') + c.raw.toFixed(1) + '%')
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { color: 'rgba(255,255,255,0.04)' },
+          ticks: { color: '#7C8698', font: { family: "'JetBrains Mono', monospace", size: 10 }, maxRotation: 60, minRotation: 45 }
+        },
+        y: {
+          grid: { color: 'rgba(255,255,255,0.06)' },
+          ticks: { color: '#7C8698', font: { family: "'JetBrains Mono', monospace", size: 10 }, callback: tickFmt }
+        }
+      }
+    },
+    plugins: [atmLinePlugin]
+  });
+  oiChartInstance.$atmStrike = data.atmStrike;
+}
+
+function filterRowsByRange(rows, atmStrike, range){
+  if (range === 'all') return rows;
+  const n = parseInt(range, 10);
+  const atmIdx = rows.findIndex(r => r.strike === atmStrike);
+  if (atmIdx === -1) return rows;
+  const start = Math.max(0, atmIdx - n);
+  const end = Math.min(rows.length - 1, atmIdx + n);
+  return rows.slice(start, end + 1);
+}
+
+function fmtLakhCr(v){
+  if (v >= 10000000) return (v/10000000).toFixed(2) + "Cr";
+  if (v >= 100000) return (v/100000).toFixed(2) + "L";
+  if (v >= 1000) return (v/1000).toFixed(1) + "K";
+  return String(Math.round(v));
+}
+
+function badgeClass(text){
+  if (text.indexOf("L") === 0 || text === "↗ L") return "b-long";
+  if (text.indexOf("S") !== -1 && text.indexOf("SC") === -1 && text.indexOf("↘") !== -1) return "b-short";
+  if (text.indexOf("SC") !== -1) return "b-sc";
+  if (text.indexOf("LU") !== -1) return "b-lu";
+  return "b-flat";
+}
+
+function heatAlpha(value, max){
+  if (!max || max <= 0) return 0;
+  const ratio = Math.max(0, Math.min(1, value / max));
+  return 0.06 + 0.34 * Math.sqrt(ratio); // non-linear, matches sheet's heatmap feel
+}
+
+function setLive(ok){
+  const dot = document.getElementById('liveDot');
+  dot.classList.toggle('stale', !ok);
+}
+
+function render(data){
+  lastGoodData = data;
+  setLive(true);
+
+  document.getElementById('updatedAt').textContent = "Updated " + data.updatedAt + " IST";
+  document.getElementById('atmStrike').textContent = data.atmStrike;
+  document.getElementById('maxPainStrike').textContent = data.maxPainStrike;
+
+  const spotEl = document.getElementById('spotValue');
+  spotEl.textContent = Number(data.spot).toFixed(2);
+  spotEl.className = 'value';
+  if (prevSpot !== null) {
+    if (data.spot > prevSpot) spotEl.classList.add('up');
+    else if (data.spot < prevSpot) spotEl.classList.add('down');
+  }
+  prevSpot = data.spot;
+
+  document.getElementById('noteBox').innerHTML = '<span class="prompt">&gt;</span> ' +
+    (data.note || 'no note yet').replace(/\n/g, '<br>');
+
+  renderTable(data);
+  renderChart(data);
+}
+
+function renderTable(data){
+  const allRows = data.rows || [];
+  const rows = filterRowsByRange(allRows, data.atmStrike, selectedRange);
+  const maxCallOI = Math.max(...rows.map(r => r.call.oi), 1);
+  const maxPutOI  = Math.max(...rows.map(r => r.put.oi), 1);
+  const maxCallVol = Math.max(...rows.map(r => r.call.volume), 1);
+  const maxPutVol  = Math.max(...rows.map(r => r.put.volume), 1);
+  const maxCallPct = Math.max(...rows.map(r => Math.abs(r.call.oiChgPct)), 1);
+  const maxPutPct  = Math.max(...rows.map(r => Math.abs(r.put.oiChgPct)), 1);
+
+  const body = document.getElementById('chainBody');
+  if (rows.length === 0) {
+    body.innerHTML = '<tr><td colspan="11" class="state-msg">No strikes in range.</td></tr>';
+    return;
+  }
+
+  body.innerHTML = rows.map(r => {
+    const callBg = 'rgba(229,72,77,' + heatAlpha(Math.abs(r.call.oiChgPct), maxCallPct) + ')';
+    const putBg  = 'rgba(47,191,143,' + heatAlpha(Math.abs(r.put.oiChgPct), maxPutPct) + ')';
+    const callOiBg = 'rgba(229,72,77,' + heatAlpha(r.call.oi, maxCallOI) + ')';
+    const putOiBg  = 'rgba(47,191,143,' + heatAlpha(r.put.oi, maxPutOI) + ')';
+    const callVolBg = 'rgba(229,72,77,' + heatAlpha(r.call.volume, maxCallVol) + ')';
+    const putVolBg  = 'rgba(47,191,143,' + heatAlpha(r.put.volume, maxPutVol) + ')';
+
+    return '<tr class="' + (r.isAtm ? 'atm-row' : '') + '">' +
+      '<td><span class="badge ' + badgeClass(r.call.buildup) + '">' + r.call.buildup + '</span></td>' +
+      '<td style="background:' + callVolBg + '">' + fmtLakhCr(r.call.volume) + '</td>' +
+      '<td class="pct-cell ' + (r.call.oiChgPct >= 0 ? 'up' : 'down') + '" style="background:' + callBg + '">' +
+        (r.call.oiChgPct >= 0 ? '+' : '') + r.call.oiChgPct.toFixed(1) + '%</td>' +
+      '<td style="background:' + callOiBg + '">' + fmtLakhCr(r.call.oi) + '</td>' +
+      '<td><span class="ltp-main">' + r.call.ltp.toFixed(2) + '</span>' +
+        '<span class="ltp-sub ' + (r.call.ltpChgPct >= 0 ? 'up' : 'down') + '">' +
+        (r.call.ltpChgPct >= 0 ? '+' : '') + r.call.ltpChgPct.toFixed(1) + '%</span></td>' +
+      '<td class="strike-cell">' + r.strike + (r.isMaxPain ? '<span class="mp">MAX PAIN</span>' : '') + '</td>' +
+      '<td><span class="ltp-main">' + r.put.ltp.toFixed(2) + '</span>' +
+        '<span class="ltp-sub ' + (r.put.ltpChgPct >= 0 ? 'up' : 'down') + '">' +
+        (r.put.ltpChgPct >= 0 ? '+' : '') + r.put.ltpChgPct.toFixed(1) + '%</span></td>' +
+      '<td style="background:' + putOiBg + '">' + fmtLakhCr(r.put.oi) + '</td>' +
+      '<td class="pct-cell ' + (r.put.oiChgPct >= 0 ? 'up' : 'down') + '" style="background:' + putBg + '">' +
+        (r.put.oiChgPct >= 0 ? '+' : '') + r.put.oiChgPct.toFixed(1) + '%</td>' +
+      '<td style="background:' + putVolBg + '">' + fmtLakhCr(r.put.volume) + '</td>' +
+      '<td><span class="badge ' + badgeClass(r.put.buildup) + '">' + r.put.buildup + '</span></td>' +
+    '</tr>';
+  }).join('');
+}
+
+async function fetchData(){
+  if (CONFIG.API_URL.indexOf("PASTE_YOUR") !== -1) {
+    document.getElementById('chainBody').innerHTML =
+      '<tr><td colspan="11" class="state-msg"><b>Setup needed:</b> paste your Apps Script Web App URL into CONFIG.API_URL in index.html</td></tr>';
+    return;
+  }
+  try {
+    const res = await fetch(CONFIG.API_URL, { cache: "no-store" });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    render(data);
+  } catch (err) {
+    // Keep showing the last good snapshot instead of wiping the screen on a transient error —
+    // same "don't vanish, just mark stale" principle as the Notes sheet fix.
+    setLive(false);
+    if (!lastGoodData) {
+      document.getElementById('chainBody').innerHTML =
+        '<tr><td colspan="11" class="state-msg">Couldn\'t reach the data source yet. Retrying…</td></tr>';
+    }
+  }
+}
+
+fetchData();
+setInterval(fetchData, CONFIG.REFRESH_MS);
+</script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NIFTY // Option Chain</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 <style>
   :root{
