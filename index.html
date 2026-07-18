@@ -270,6 +270,15 @@
       </div>
     </div>
 
+    <div class="chart-section">
+      <div class="chart-header">
+        <div class="chart-title">OI Change (Day) — Call vs Put vs PE-CE</div>
+      </div>
+      <div class="chart-canvas-wrap" style="height:340px; margin-right:6px;">
+        <canvas id="oiSeriesChart"></canvas>
+      </div>
+    </div>
+
     <div class="foot">Source: Google Sheets / Apps Script backend · auto-refreshes every <span id="refreshSecs">45</span>s</div>
   </div>
 
@@ -278,7 +287,7 @@
  * CONFIG — paste your deployed Apps Script Web App /exec URL here
  * ============================================================ */
 const CONFIG = {
-  API_URL: "https://script.google.com/macros/s/AKfycbzDLFRrdYij5IHk8m-MsuD8tqPbO4DxC-3aVYZQ6GQCgOphjoTqLHGBLKQ1uptcPTg/exec",
+  API_URL: "https://script.google.com/macros/s/AKfycby1y_XFC0cy5qAXDSi6q3GopgWdYlgqHbVSOK8z9HgZ1WFSswl44f77JvGa4f8K2Tdl/exec",
   REFRESH_MS: 45000
 };
 
@@ -439,6 +448,138 @@ function setLive(ok){
   dot.classList.toggle('stale', !ok);
 }
 
+function fmtCrLabel(cr){
+  const sign = cr < 0 ? '-' : '';
+  const abs = Math.abs(cr);
+  if (abs >= 1) return sign + abs.toFixed(2) + 'Cr';
+  return sign + (abs * 100).toFixed(2) + 'L';
+}
+
+function roundRect(ctx, x, y, w, h, r){
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// Dotted line at the latest point + a small colored value badge at each series' last point
+const seriesEndPlugin = {
+  id: 'seriesEndPlugin',
+  afterDraw(chart) {
+    const { ctx, chartArea, scales } = chart;
+    const xScale = scales.x, yScale = scales.y;
+    const lastIdx = chart.data.labels.length - 1;
+    if (lastIdx < 0) return;
+    const x = xScale.getPixelForValue(lastIdx);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.setLineDash([3, 3]);
+    ctx.moveTo(x, chartArea.top);
+    ctx.lineTo(x, chartArea.bottom);
+    ctx.strokeStyle = 'rgba(231,234,240,0.3)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+
+    chart.data.datasets.forEach(ds => {
+      const val = ds.data[lastIdx];
+      if (val == null) return;
+      const y = yScale.getPixelForValue(val);
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+      ctx.strokeStyle = ds.borderColor;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.restore();
+
+      const label = fmtCrLabel(val);
+      ctx.save();
+      ctx.font = "600 10.5px 'JetBrains Mono', monospace";
+      const textW = ctx.measureText(label).width;
+      const padX = 6, boxH = 17;
+      const boxX = Math.min(chartArea.right - textW - padX * 2 - 2, x + 10);
+      const boxY = y - boxH / 2;
+      ctx.fillStyle = ds.borderColor;
+      roundRect(ctx, boxX, boxY, textW + padX * 2, boxH, 4);
+      ctx.fill();
+      ctx.fillStyle = '#0B0E13';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, boxX + padX, y + 1);
+      ctx.restore();
+    });
+  }
+};
+
+let oiSeriesChartInstance = null;
+
+function renderOiSeriesChart(data){
+  if (typeof Chart === 'undefined') return;
+  const series = data.oiSeries || [];
+  if (series.length === 0) return;
+
+  const labels = series.map(p => p.time);
+  const putData = series.map(p => p.putChgCr);
+  const callData = series.map(p => p.callChgCr);
+  const peceData = series.map(p => p.peceChgCr);
+
+  if (oiSeriesChartInstance) {
+    oiSeriesChartInstance.data.labels = labels;
+    oiSeriesChartInstance.data.datasets[0].data = putData;
+    oiSeriesChartInstance.data.datasets[1].data = callData;
+    oiSeriesChartInstance.data.datasets[2].data = peceData;
+    oiSeriesChartInstance.update();
+    return;
+  }
+
+  const ctx = document.getElementById('oiSeriesChart').getContext('2d');
+  oiSeriesChartInstance = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Put OI (Chg Day)', data: putData, borderColor: '#2FBF71', backgroundColor: 'transparent', borderWidth: 2, pointRadius: 0, tension: 0.25 },
+        { label: 'Call OI (Chg Day)', data: callData, borderColor: '#E5484D', backgroundColor: 'transparent', borderWidth: 2, pointRadius: 0, tension: 0.25 },
+        { label: 'PE-CE (Chg Day)', data: peceData, borderColor: '#9B8AFB', backgroundColor: 'transparent', borderWidth: 2, pointRadius: 0, tension: 0.25 }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      layout: { padding: { right: 54 } },
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          labels: { color: '#7C8698', font: { family: "'JetBrains Mono', monospace", size: 11 }, usePointStyle: true }
+        },
+        tooltip: {
+          backgroundColor: '#151B26', borderColor: '#1F2733', borderWidth: 1,
+          titleColor: '#E7EAF0', bodyColor: '#E7EAF0', padding: 10,
+          titleFont: { family: "'Space Grotesk', sans-serif" },
+          bodyFont: { family: "'JetBrains Mono', monospace" },
+          callbacks: { label: (c) => c.dataset.label + ': ' + fmtCrLabel(c.raw) }
+        }
+      },
+      scales: {
+        x: {
+          grid: { color: 'rgba(255,255,255,0.04)' },
+          ticks: { color: '#7C8698', font: { family: "'JetBrains Mono', monospace", size: 10 }, maxTicksLimit: 8, autoSkip: true }
+        },
+        y: {
+          grid: { color: 'rgba(255,255,255,0.06)' },
+          ticks: { color: '#7C8698', font: { family: "'JetBrains Mono', monospace", size: 10 }, callback: (v) => fmtCrLabel(v) }
+        }
+      }
+    },
+    plugins: [seriesEndPlugin]
+  });
+}
+
 function render(data){
   lastGoodData = data;
   setLive(true);
@@ -461,6 +602,7 @@ function render(data){
 
   renderTable(data);
   renderChart(data);
+  renderOiSeriesChart(data);
 }
 
 function renderTable(data){
